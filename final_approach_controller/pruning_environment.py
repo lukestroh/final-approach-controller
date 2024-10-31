@@ -29,11 +29,10 @@ class FinalApproachControllerEnvironment(PruningEnv):
         
         # Camera, tof setup
         for sensor, metadata in self.sensor_config["cameras"].items():
-            if sensor == "rgbd":
-                for i in range(metadata["quantity"]):
+            for i in range(metadata["quantity"]):
+                if sensor == "rgbd":
                     self.cameras[f"{metadata['type']}_{i}"] = Camera(sensor_name=metadata["type"])
-            if sensor == "tof":
-                for i in range(metadata["quantity"]):
+                if sensor == "tof":
                     self.tofs[f"{metadata['type']}_{i}"] = TimeOfFlight(sensor_name=metadata["type"])
         print(self.cameras)
         print(self.tofs)
