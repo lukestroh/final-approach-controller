@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# [tool.hatch.metadata]
+# allow-direct-references = true
+
+[project]
+name = "final_approach_controller"
+version = "0.0.1"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Luke Strohbehn", email = "luke.strohbehn@gmail.com" },
+]
+maintainers = [
+    { name = "Luke Strohbehn", email = "luke.strohbehn@gmail.com" },
+]
+description = "A package for running the final approach controller using the pybullet-tree-sim package."
+requires-python = ">=3.8"
+dependencies = [
+    # "pybullet_tree_sim @ file://../pybullet_tree_sim",
+    
+]
