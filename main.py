@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
+from final_approach_controller.pruning_environment import FinalApproachControllerEnvironment
 
 from pybullet_tree_sim.pruning_environment import PruningEnv
 from pybullet_tree_sim.tree import Tree
 from pybullet_tree_sim.utils.pyb_utils import PyBUtils
 from pybullet_tree_sim.utils.camera_helpers import get_fov_from_dfov
-
-from final_approach_controller.pruning_environment import FinalApproachControllerEnvironment
 
 import numpy as np
 import secrets

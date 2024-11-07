@@ -1,12 +1,21 @@
 # This file defines the sensors that are connected to the robot.
 cameras:
     rgbd: 
-        type: realsense_d435i
+        name: realsense_d435i
         quantity: 1
+        pan: 0
+        tilt: 0
+        tf_frames: 
+            - camera_link_0
         
     tof:
-        type: vl6180
+        name: vl53l8cx
         quantity: 2
+        pan: 0 # for now, we assume that the TOF sensors are mounted on the same plane as defined by the URDF. Change if needed.
+        tilt: 0
+        tf_frames: 
+            - tof_link_0
+            - tof_link_1
         
     
     

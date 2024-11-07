@@ -5,6 +5,7 @@ from final_approach_controller.cut_point_rotate_axis_controller import CutPointR
 class HybridController:
     def __init__(self) -> None:
         
+        self.speed_scale = 0.1
         self.cut_point_rotate_axis_controller = CutPointRotateAxisController()
         
         return
