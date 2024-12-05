@@ -5,69 +5,79 @@ import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation
 import time
 
+from zenlog import log
+import pprint as pp
 
-class CutPointRotateAxisController():
-    def __init__(self) -> None:
-        self.num_sensors = 2 # TODO: Get from config.
-        self.speed_scale = 1.0 # TODO: Get from config.
+class CutPointRotateAxisController:
+    def __init__(self, links, sensors) -> None:
+        # self.num_sensors = 2  # TODO: Get from config.
+        self.speed_scale = 1.0  # TODO: Get from config.
+        self.max_angular_speed = np.pi / 2 * self.speed_scale
+        
+        self.tf_base_to_tof0 = np.identity(4)
+        self.tf_base_to_tof0[:3, 3] = links[sensors['tof0'].tf_frame]['tf_to_parent']
+        self.tf_base_to_tof1 = np.identity(4)
+        self.tf_base_to_tof1[:3, 3] = links[sensors['tof1'].tf_frame]['tf_to_parent']
+        self.tf_tof0_to_tof1 = mr.TransInv(self.tf_base_to_tof0) @ self.tf_base_to_tof1
+        # log.warn(pp.pformat(links))
+        self.tf_base_to_cut_point = np.identity(4)  # we can get this from the robot class
+        self.tf_base_to_cut_point[:3, 3] = links['mock_pruner__tool0']['tf_to_parent']
         return
 
     def get_angle_from_perpendicular(self, data: dict) -> float:
         # Make sure the two TOF frames are aligned with the end effector frame # TODO: This should be checked in init
-        M = mr.TransInv(data['tf_tof0_to_eef']) @ data['tf_tof1_to_eef']
+        # M = mr.TransInv(data['tf_tof0_to_eef']) @ data['tf_tof1_to_eef']
         # print(M)
-        if not np.all(np.isclose(M[:3, :3], np.identity(3))):
-            raise ValueError("The two TOF frames are not aligned with the end effector frame.")
-    
+        
+        if not np.all(np.isclose(self.tf_tof0_to_tof1[:3, :3], np.identity(3))):
+            raise ValueError("The two ToF frames are not aligned with each other.")
+
         # Calculate the distance between the two TOF sensors # TODO: save this info in class attr
-        tof_tof0_to_tof1_pos_vec = M[:3, 3]
+        tof0_to_tof1_pos_vec = self.tf_tof0_to_tof1[:3, 3]
         # print(tof_linear_pos_vec)
-        tof_linear_distance = np.linalg.norm(tof_tof0_to_tof1_pos_vec)
-        # print(x_diff)
-        d0 = np.linalg.norm(data['reading0'] - data['tof0_pos'])
-        d1 = np.linalg.norm(data['reading1'] - data['tof1_pos'])
+        tof_linear_distance = np.linalg.norm(tof0_to_tof1_pos_vec)
+        d0 = np.linalg.norm(data["tof0"]["data"])
+        d1 = np.linalg.norm(data["tof1"]["data"])
         d_diff = d0 - d1
-    
-        theta = np.arctan(d_diff / tof_linear_distance) # should return angle [-pi/2, pi/2]
-    
+
+        theta = np.arctan(d_diff / tof_linear_distance)  # should return angle (-pi/2, pi/2)
+
         return theta
 
     def get_rotation_axis(self, data: dict):
         """Get the rotation axis in the camera frame."""
-        rotation_point = np.mean([data['reading0'], data['reading1']], axis=0)
-        rotation_axis = np.zeros((6,1), dtype=float)
-        rotation_axis[0:3, :] = rotation_point.reshape(3,1)
-        rotation_axis[3:6, :] = np.cross(data['reading0'] - data['tof0_pos'], data['reading1'] - data['tof1_pos']).reshape(3,1)
+        rotation_point = np.mean([data["tof0"]["data"], data["tof1"]["data"]], axis=0)
+        rotation_axis = np.zeros((6, 1), dtype=float)
+        rotation_axis[0:3, :] = rotation_point[0, :3].reshape(3, 1)
+        rotation_axis[3:6, :] = np.cross(data["tof0"]["data"][0, :3], data["tof1"]["data"][0, :3]).reshape(
+            3, 1
+        )  # TODO: clean up homogeneous point
         # If the cross product is zero then the two vectors are parallel, so we can just choose the  y-axis (camera frame)
         if np.linalg.norm(rotation_axis[3:6, :]) != 0:
             rotation_axis[3:6, :] = rotation_axis[3:6, :] / np.linalg.norm(rotation_axis[3:6, :])
         else:
-            rotation_axis[3:6, :] = np.array([0, 1, 0]).reshape(3,1)
+            rotation_axis[3:6, :] = np.array([[0, 1, 0]]).T
         return rotation_axis
 
     def get_cut_point_to_rot_axis_transform(self, data: dict, rot_ax: np.ndarray):
         """TODO: replace with actual transform from end effector to cut point."""
         tf_axis_to_eef = np.identity(4)
         tf_axis_to_eef[:3, 3] = rot_ax[:3, 0]
-    
-        tf_cut_point_to_rot_axis = data['tf_eef_to_cut_point'] @ tf_axis_to_eef
+        tf_cut_point_to_rot_axis = self.tf_base_to_cut_point @ tf_axis_to_eef
         return tf_cut_point_to_rot_axis
 
     def get_twist(self, tf_cut_point_to_rot_axis: np.ndarray, angle_from_perpendicular: float):
-    
         # TODO: put this in class attr
-        max_angular_speed = np.pi / 2
-        K_p = 1 / max_angular_speed
-        
+        K_p = 1 / self.max_angular_speed
+
         # We are in the camera frame, so the angular velocity is along the y-axis, which points down
         angular_velocity = [0, K_p * angle_from_perpendicular, 0]
         linear_velocity = np.cross(angular_velocity, tf_cut_point_to_rot_axis[:3, 3])
         # print(f"Cut point to rotation axis transform:\n{tf_cut_point_to_rot_axis}")
         # print(f"Linear velocity:\n{linear_velocity}")
         # print(f"Angular velocity:\n{angular_velocity}")
-        twist = np.concatenate((linear_velocity, angular_velocity), axis=0).reshape(6,1)
-        print(twist)
-        return linear_velocity, angular_velocity
+        twist = np.concatenate((linear_velocity, angular_velocity), axis=0).reshape(6, 1)
+        return twist
 
     def plot_3d_coordinate_frame(self, fig, position: np.ndarray, orientation: np.ndarray, name: str = "origin"):
         # if name in self.coordinate_frames:
@@ -84,7 +94,7 @@ class CutPointRotateAxisController():
                 "u": np.array([zoom_scale * cone_scale]),
                 "v": np.array([0]),
                 "w": np.array([0]),
-                "color": "red"
+                "color": "red",
             },
             "y-axis": {
                 "x": np.array([position[0], position[0] + 0]),
@@ -93,7 +103,7 @@ class CutPointRotateAxisController():
                 "u": np.array([0]),
                 "v": np.array([zoom_scale * cone_scale]),
                 "w": np.array([0]),
-                "color": "green"
+                "color": "green",
             },
             "z-axis": {
                 "x": np.array([position[0], position[0] + 0]),
@@ -102,10 +112,10 @@ class CutPointRotateAxisController():
                 "u": np.array([0]),
                 "v": np.array([0]),
                 "w": np.array([zoom_scale * cone_scale]),
-                "color": "blue"
-            }
+                "color": "blue",
+            },
         }
-    
+
         for axis, val in axes.items():
             fig.add_trace(
                 go.Scatter3d(
@@ -114,16 +124,13 @@ class CutPointRotateAxisController():
                     z=axes[axis]["z"],
                     name=f"{name}_{axis}",
                     mode="lines",
-                    line=dict(
-                        width=3,
-                        color=axes[axis]["color"]
-                    ),
+                    line=dict(width=3, color=axes[axis]["color"]),
                     showlegend=True,
                     legendgroup=f"{name}_{axis}",
                     legendgrouptitle=dict(text=name),
                 )
             )
-    
+
             fig.add_trace(
                 go.Cone(
                     x=[axes[axis]["x"][1]],
@@ -134,12 +141,12 @@ class CutPointRotateAxisController():
                     w=axes[axis]["w"],
                     name=axis,
                     showscale=False,
-                    colorscale= [ [ 0, axes[axis]["color"] ], [ 1, axes[axis]["color"] ] ],
+                    colorscale=[[0, axes[axis]["color"]], [1, axes[axis]["color"]]],
                     anchor="tail",
                     sizemode="scaled",
                     legendgroup=f"{name}_{axis}",
                     legendgrouptitle=dict(text=name),
-                    showlegend=True
+                    showlegend=True,
                     # hoverinfo="skip",
                     # hovertemplate=None
                 )
@@ -148,27 +155,27 @@ class CutPointRotateAxisController():
 
     def plot(self, data: dict):
         fig = go.Figure()
-        
-        self.plot_3d_coordinate_frame(fig=fig, position=[0,0,0], orientation=[0,0,0,1], name="coord_eef")
-        self.plot_3d_coordinate_frame(fig=fig, position=data['tf_eef_to_cut_point'][:3, 3].T, orientation=[0,0,0,1], name="coord_cut_point")
-    
-    
+
+        self.plot_3d_coordinate_frame(fig=fig, position=[0, 0, 0], orientation=[0, 0, 0, 1], name="coord_eef")
+        self.plot_3d_coordinate_frame(
+            fig=fig, position=data["tf_eef_to_cut_point"][:3, 3].T, orientation=[0, 0, 0, 1], name="coord_cut_point"
+        )
+
         for i in range(self.num_sensors):
-            self.plot_3d_coordinate_frame(fig=fig, position=data[f'tof{i}_pos'], orientation=[0,0,0,1], name=f"coord_tof{i}")
+            self.plot_3d_coordinate_frame(
+                fig=fig, position=data[f"tof{i}_pos"], orientation=[0, 0, 0, 1], name=f"coord_tof{i}"
+            )
             fig.add_trace(
                 go.Scatter3d(
-                    x=[data[f'reading{i}'][0]],
-                    y=[data[f'reading{i}'][1]],
-                    z=[data[f'reading{i}'][2]],
+                    x=[data[f"reading{i}"][0]],
+                    y=[data[f"reading{i}"][1]],
+                    z=[data[f"reading{i}"][2]],
                     name=f"TOF_reading_{i}",
                     mode="markers",
-                    marker=dict(
-                        size=6,
-                        color="red"
-                    )
+                    marker=dict(size=6, color="red"),
                 )
             )
-    
+
         _size = 1.0
         fig.update_layout(
             scene=dict(
@@ -178,12 +185,11 @@ class CutPointRotateAxisController():
                 zaxis=dict(range=[-_size, _size]),
             ),
             title="EEF coordinates",
-            legend=dict(traceorder='grouped')
+            legend=dict(traceorder="grouped"),
         )
-    
-    
+
         fig.show()
-    
+
         return
 
 
@@ -193,7 +199,7 @@ def main():
     # tf_tof1_to_eef = _get_transform_matrix("tof1", "eef")
     # tf_cut_point_to_eef = _get_transform_matrix("cut_point", "eef")
     # tf_eef_to_world = _get_transform_matrix("eef", "world")
-    # 
+    #
     controller = CutPointRotateAxisController()
 
     x_offset = 0.0
@@ -203,47 +209,18 @@ def main():
     tof_x_dist_from_eef = 0.15
 
     test_data = dict(
-        max_angular_velocity = 0.1,
-        max_linear_velocity = 0.1,
-        tof0_pos = np.array([tof_x_dist_from_eef+x_offset, 0, 0.1]),
-        tof1_pos = np.array([-tof_x_dist_from_eef+x_offset, 0, 0.1]),
-
+        max_angular_velocity=0.1,
+        max_linear_velocity=0.1,
+        tof0_pos=np.array([tof_x_dist_from_eef + x_offset, 0, 0.1]),
+        tof1_pos=np.array([-tof_x_dist_from_eef + x_offset, 0, 0.1]),
         # These should be in the camera frame, not the eef frame nor the tof frames.
-        reading0 = np.array([tof_x_dist_from_eef+x_offset, 0, 0.61]),
-        reading1 = np.array([-tof_x_dist_from_eef+x_offset, 0, 0.81]),
-
-        tf_tof0_to_eef = np.array(
-            [[1, 0, 0, 0.1],
-             [0, 1, 0, 0],
-             [0, 0, 1, 0.1],
-             [0, 0, 0, 1]
-            ]
-        ),
-        tf_tof1_to_eef = np.array(
-            [[1, 0, 0, -0.1],
-             [0, 1, 0, 0],
-             [0, 0, 1, 0.1],
-             [0, 0, 0, 1]
-            ]
-        ),
-        tf_eef_to_cut_point = np.array(
-            [[1, 0, 0, 0],
-             [0, 1, 0, 0],
-             [0, 0, 1, 0.4],
-             [0, 0, 0, 1]
-            ]
-        ),
-        tf_eef_to_world = np.array(
-            [[1, 0, 0, -0.25],
-             [0, 1, 0, 0.6],
-             [0, 0, 1, 1.45],
-             [0, 0, 0, 1]
-            ]
-        )
+        reading0=np.array([tof_x_dist_from_eef + x_offset, 0, 0.61]),
+        reading1=np.array([-tof_x_dist_from_eef + x_offset, 0, 0.81]),
+        tf_tof0_to_eef=np.array([[1, 0, 0, 0.1], [0, 1, 0, 0], [0, 0, 1, 0.1], [0, 0, 0, 1]]),
+        tf_tof1_to_eef=np.array([[1, 0, 0, -0.1], [0, 1, 0, 0], [0, 0, 1, 0.1], [0, 0, 0, 1]]),
+        tf_eef_to_cut_point=np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.4], [0, 0, 0, 1]]),
+        tf_eef_to_world=np.array([[1, 0, 0, -0.25], [0, 1, 0, 0.6], [0, 0, 1, 1.45], [0, 0, 0, 1]]),
     )
-    
-    
-
 
     while True:
         try:
@@ -257,7 +234,9 @@ def main():
 
                 # Rotate around camera y-axis
                 R = np.identity(4)
-                R[:3, :3] = Rotation.from_euler('xyz', (rot_ax[3:6, :] * np.array([[0, angle_from_perpendicular, 0]]).T).T, degrees=False).as_matrix()
+                R[:3, :3] = Rotation.from_euler(
+                    "xyz", (rot_ax[3:6, :] * np.array([[0, angle_from_perpendicular, 0]]).T).T, degrees=False
+                ).as_matrix()
 
                 twist = controller.get_twist(tf_cut_point_to_rot_axis, angle_from_perpendicular)
                 print(R)
@@ -265,14 +244,13 @@ def main():
                 time.sleep(1)
                 break
 
-            print('debug exit loop')
+            print("debug exit loop")
             break
 
         except KeyboardInterrupt:
             break
 
     controller.plot(test_data)
-
 
     return
 

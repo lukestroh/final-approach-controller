@@ -6,16 +6,16 @@ cameras:
         pan: 0
         tilt: 0
         tf_frames: 
-            - camera_link_0
-        
+            - mock_pruner__camera0 # TODO: make these dynamic with eef_prefix
+            
     tof:
-        name: vl53l8cx
-        quantity: 2
+        name: vl6180
+        quantity: 2 # TODO: delete, iterate only over frames
         pan: 0 # for now, we assume that the TOF sensors are mounted on the same plane as defined by the URDF. Change if needed.
         tilt: 0
         tf_frames: 
-            - tof_link_0
-            - tof_link_1
+            - mock_pruner__tof0
+            - mock_pruner__tof1
         
     
     
