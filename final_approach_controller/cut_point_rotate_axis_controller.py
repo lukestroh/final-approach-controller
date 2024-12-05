@@ -11,8 +11,7 @@ import pprint as pp
 class CutPointRotateAxisController:
     def __init__(self, links, sensors) -> None:
         # self.num_sensors = 2  # TODO: Get from config.
-        self.speed_scale = 1.0  # TODO: Get from config.
-        self.max_angular_speed = np.pi / 2 * self.speed_scale
+        self.max_angular_speed = np.pi / 2
         
         self.tf_base_to_tof0 = np.identity(4)
         self.tf_base_to_tof0[:3, 3] = links[sensors['tof0'].tf_frame]['tf_to_parent']
@@ -22,6 +21,7 @@ class CutPointRotateAxisController:
         # log.warn(pp.pformat(links))
         self.tf_base_to_cut_point = np.identity(4)  # we can get this from the robot class
         self.tf_base_to_cut_point[:3, 3] = links['mock_pruner__tool0']['tf_to_parent']
+        # log.warn(f"tf_base_to_cut_point:\n{self.tf_base_to_cut_point}")
         return
 
     def get_angle_from_perpendicular(self, data: dict) -> float:
@@ -36,8 +36,12 @@ class CutPointRotateAxisController:
         tof0_to_tof1_pos_vec = self.tf_tof0_to_tof1[:3, 3]
         # print(tof_linear_pos_vec)
         tof_linear_distance = np.linalg.norm(tof0_to_tof1_pos_vec)
-        d0 = np.linalg.norm(data["tof0"]["data"])
-        d1 = np.linalg.norm(data["tof1"]["data"])
+        d0 = np.linalg.norm(data["tof0"]["data"][0, 0:3])
+        d1 = np.linalg.norm(data["tof1"]["data"][0, 0:3])
+        log.err(f"tof0: {data['tof0']['data']}")
+        log.err(f"tof1: {data['tof1']['data']}")
+
+        log.err(f'tof0: {d0}, tof1: {d1}')
         d_diff = d0 - d1
 
         theta = np.arctan(d_diff / tof_linear_distance)  # should return angle (-pi/2, pi/2)
@@ -47,12 +51,14 @@ class CutPointRotateAxisController:
     def get_rotation_axis(self, data: dict):
         """Get the rotation axis in the camera frame."""
         rotation_point = np.mean([data["tof0"]["data"], data["tof1"]["data"]], axis=0)
+        log.debug(f"Rotation point: {rotation_point}")
         rotation_axis = np.zeros((6, 1), dtype=float)
         rotation_axis[0:3, :] = rotation_point[0, :3].reshape(3, 1)
         rotation_axis[3:6, :] = np.cross(data["tof0"]["data"][0, :3], data["tof1"]["data"][0, :3]).reshape(
             3, 1
         )  # TODO: clean up homogeneous point
-        # If the cross product is zero then the two vectors are parallel, so we can just choose the  y-axis (camera frame)
+        log.debug(f"rotation_axis\n{rotation_axis}")
+        # If the cross product is zero then the two vectors are parallel, so we can just choose the  y-axis (camera frame).
         if np.linalg.norm(rotation_axis[3:6, :]) != 0:
             rotation_axis[3:6, :] = rotation_axis[3:6, :] / np.linalg.norm(rotation_axis[3:6, :])
         else:
@@ -63,12 +69,17 @@ class CutPointRotateAxisController:
         """TODO: replace with actual transform from end effector to cut point."""
         tf_axis_to_eef = np.identity(4)
         tf_axis_to_eef[:3, 3] = rot_ax[:3, 0]
-        tf_cut_point_to_rot_axis = self.tf_base_to_cut_point @ tf_axis_to_eef
+        tf_cut_point_to_rot_axis = mr.TransInv(self.tf_base_to_cut_point) @ tf_axis_to_eef
+        # log.warn(self.tf_base_to_cut_point)
+        # log.warn(tf_axis_to_eef)
+        # log.warn(tf_cut_point_to_rot_axis)
         return tf_cut_point_to_rot_axis
 
     def get_twist(self, tf_cut_point_to_rot_axis: np.ndarray, angle_from_perpendicular: float):
         # TODO: put this in class attr
         K_p = 1 / self.max_angular_speed
+        
+        log.error(f"Angle from perpendicular: {angle_from_perpendicular}")
 
         # We are in the camera frame, so the angular velocity is along the y-axis, which points down
         angular_velocity = [0, K_p * angle_from_perpendicular, 0]

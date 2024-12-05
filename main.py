@@ -12,6 +12,7 @@ import numpy as np
 import secrets
 import time
 from zenlog import log
+import pprint as pp
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     )
 
     _1_inch = 0.0254
-    penv.activate_shape(shape="cylinder", radius=_1_inch * 2, height=2.85, orientation=[0, np.pi / 2, 0])
+    penv.activate_shape(shape="cylinder", radius=_1_inch, height=2.82, orientation=[0, np.pi / 2, 0])
     # penv.activate_shape(shape="cylinder", radius=0.01, height=2.85, orientation=[0, np.pi / 2, 0])
 
     # penv.load_tree(
@@ -44,10 +45,13 @@ def main():
     for i in range(100):
         pbutils.pbclient.stepSimulation()
         time.sleep(0.1)
+        
+    # log.debug(pp.pformat(robot.links))
 
     # Simulation loop
     while True:
         try:
+            
             # log.debug(f"{robot.sensors['tof0']}")
             tof0_view_matrix = robot.get_view_mat_at_curr_pose(camera=robot.sensors["tof0"])
             tof0_rgbd = robot.get_rgbd_at_cur_pose(
@@ -76,7 +80,7 @@ def main():
 
             # Step simulation
             pbutils.pbclient.stepSimulation()
-            time.sleep(0.001)
+            time.sleep(0.01)
         except KeyboardInterrupt:
             break
 

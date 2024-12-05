@@ -9,6 +9,7 @@ from scipy.spatial.transform import Rotation
 import time
 
 from zenlog import log
+import pprint as pp
 
 
 class PruningRobot(Robot):
@@ -34,10 +35,19 @@ class PruningRobot(Robot):
                     sensor_data = self.read_sensors()
                     theta = self.hybrid_controller.cut_point_rotate_axis_controller.get_angle_from_perpendicular(
                         data=sensor_data
-                    )
-                    if not np.isclose(theta, 0.0, atol=np.radians(2)):
+                    ) * -1 # TODO: Remove the negative sign, tofs are flipped
+                    log.debug(f"theta: {theta * 180 / np.pi}")
+                    log.debug(pp.pformat(sensor_data))
+                    # log.err(self.pbclient.getLinkState(self.robot, self.links['mock_pruner__tool0']['id']))
+                    # tf_world_to_eef = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['mock_pruner__tool0']['id'])).reshape([4, 4], order="F")
+                    # tf_world_to_mock_pruner_base = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['mock_pruner__base']['id'])).reshape([4,4], order="F")
+                    # tf_world_to_ur5e_tool0 = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['ur5e__tool0']['id'])).reshape([4,4], order="F")
+                    # log.debug(f'tf world to eef:\n{mr.TransInv(tf_world_to_eef)}')
+                    # log.debug(f'to base:\n{tf_world_to_mock_pruner_base}')
+                    # log.debug(f'to ur5e tool0:\n{tf_world_to_ur5e_tool0}')
+                    if not np.isclose(theta, 0.0, atol=np.radians(1)):
                         rot_ax = self.hybrid_controller.cut_point_rotate_axis_controller.get_rotation_axis(data=sensor_data)
-    
+                        log.debug(f"Rotation axis:\n{rot_ax}")
                         tf_cut_point_to_rot_axis = (
                             self.hybrid_controller.cut_point_rotate_axis_controller.get_cut_point_to_rot_axis_transform(
                                 data=sensor_data, rot_ax=rot_ax
@@ -46,7 +56,8 @@ class PruningRobot(Robot):
                         
                         # Rotate around camera y-axis
                         rot_ax_orientation = rot_ax[3:6, :].flatten()
-                        log.info(f"Rotating around axis: {rot_ax_orientation}")
+                        log.debug(f"Rotating around axis: {rot_ax_orientation}")
+                        # DON't DELETE, use for test
                         # R = np.identity(4)
                         # R[:3, :3] = Rotation.from_euler("xyz", (rot_ax_orientation * np.array([0, theta, 0])), degrees=False).as_matrix()
                         
@@ -54,18 +65,24 @@ class PruningRobot(Robot):
                         
                         twist_mp_tool0_frame = self.hybrid_controller.cut_point_rotate_axis_controller.get_twist(tf_cut_point_to_rot_axis, theta)
                         
-                        log.warn(f'Twist: {twist_mp_tool0_frame}')
+                        log.warn(f'Twist:\n{twist_mp_tool0_frame}')
                         
-                        tf_world_to_eef = np.asarray(self.get_eef_view_mat_at_curr_pose()).reshape([4, 4], order="F")
+                        tf_eef_to_world = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['mock_pruner__tool0']['id'])).reshape([4, 4], order="F")
+                        # tf_mock_pruner_base_to_world = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['mock_pruner__base']['id'])).reshape([4,4], order="F")
+                        # tf_ur5e_tool0_to_world = np.asarray(self.get_view_mat_by_id_at_curr_pose(id=self.links['ur5e__tool0']['id'])).reshape([4,4], order="F")
+                        log.debug(f'tf world to eef:\n{mr.TransInv(tf_eef_to_world)}')
+                        # log.debug(f'to base:\n{mr.TransInv(tf_mock_pruner_base_to_world)}')
+                        # log.debug(f'to ur5e tool0:\n{mr.TransInv(tf_ur5e_tool0_to_world)}')
+                        # Rotate our vectors to the world frame
+                        linear_v_world_frame = np.linalg.inv(tf_eef_to_world[:3, :3]) @ twist_mp_tool0_frame[0:3, 0]
+                        angular_v_world_frame = np.linalg.inv(tf_eef_to_world[:3, :3]) @ twist_mp_tool0_frame[3:6, 0]
+                        log.warn(f'linear_v_camera_frame: {twist_mp_tool0_frame[0:3,0]}')
+                        log.warn(f'angular_v_camera_frame: {twist_mp_tool0_frame[3:6,0]}')
+                        log.debug(f'linear_v_world_frame: {linear_v_world_frame}')
+                        log.debug(f'angular_v_world_frame: {angular_v_world_frame}')
                         
-                        log.err(mr.TransInv(tf_world_to_eef))
-                        log.err(np.concatenate((twist_mp_tool0_frame[3:6, 0], [1])))
-                        linear_v_world_frame = mr.TransInv(tf_world_to_eef) @ np.concatenate((twist_mp_tool0_frame[0:3, 0], [1]))
-                        angular_v_world_frame = mr.TransInv(tf_world_to_eef) @ np.concatenate((twist_mp_tool0_frame[3:6, 0], [1]))
-                        
-                        
-                        action = np.concatenate((linear_v_world_frame[0:3], angular_v_world_frame[0:3]))
-                        log.debug(action)
+                        action = np.concatenate((linear_v_world_frame, angular_v_world_frame)) * self.hybrid_controller.speed_scale
+                        log.debug(f'action\n{action}')
                     # log.warn(f"Theta: {theta}")
                     else:
                         log.info(f"Perpendicularity reached. Theta: {theta * 180 / np.pi}")
@@ -82,11 +99,10 @@ class PruningRobot(Robot):
                 rgb, depth = self.get_rgbd_at_cur_pose(camera=sensor, type="sensor", view_matrix=view_matrix)
                 view_matrix = np.asarray(view_matrix).reshape([4, 4], order="F")
                 depth = depth.reshape((sensor.depth_width * sensor.depth_height, 1), order="F")
-
                 camera_points = self.deproject_pixels_to_points(
                     sensor=sensor, data=depth, view_matrix=view_matrix, return_frame="sensor"
                 )
-
+                
                 sensor_data.update(
                     {
                         sensor_name: {
