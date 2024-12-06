@@ -14,13 +14,13 @@ class CutPointRotateAxisController:
         self.max_angular_speed = np.pi / 2
         
         self.tf_base_to_tof0 = np.identity(4)
-        self.tf_base_to_tof0[:3, 3] = links[sensors['tof0'].tf_frame]['tf_to_parent']
+        self.tf_base_to_tof0[:3, 3] = links[sensors['tof0'].tf_frame]['tf_from_parent']
         self.tf_base_to_tof1 = np.identity(4)
-        self.tf_base_to_tof1[:3, 3] = links[sensors['tof1'].tf_frame]['tf_to_parent']
+        self.tf_base_to_tof1[:3, 3] = links[sensors['tof1'].tf_frame]['tf_from_parent']
         self.tf_tof0_to_tof1 = mr.TransInv(self.tf_base_to_tof0) @ self.tf_base_to_tof1
         # log.warn(pp.pformat(links))
         self.tf_base_to_cut_point = np.identity(4)  # we can get this from the robot class
-        self.tf_base_to_cut_point[:3, 3] = links['mock_pruner__tool0']['tf_to_parent']
+        self.tf_base_to_cut_point[:3, 3] = links['mock_pruner__tool0']['tf_from_parent']
         # log.warn(f"tf_base_to_cut_point:\n{self.tf_base_to_cut_point}")
         return
 
@@ -29,7 +29,7 @@ class CutPointRotateAxisController:
         # M = mr.TransInv(data['tf_tof0_to_eef']) @ data['tf_tof1_to_eef']
         # print(M)
         
-        if not np.all(np.isclose(self.tf_tof0_to_tof1[:3, :3], np.identity(3))):
+        if not np.all(np.isclose(self.tf_tof0_to_tof1[:3, :3], np.identity(3), atol=1e-3)):
             raise ValueError("The two ToF frames are not aligned with each other.")
 
         # Calculate the distance between the two TOF sensors # TODO: save this info in class attr
@@ -38,10 +38,10 @@ class CutPointRotateAxisController:
         tof_linear_distance = np.linalg.norm(tof0_to_tof1_pos_vec)
         d0 = np.linalg.norm(data["tof0"]["data"][0, 0:3])
         d1 = np.linalg.norm(data["tof1"]["data"][0, 0:3])
-        log.err(f"tof0: {data['tof0']['data']}")
-        log.err(f"tof1: {data['tof1']['data']}")
+        # log.err(f"tof0: {data['tof0']['data']}")
+        # log.err(f"tof1: {data['tof1']['data']}")
 
-        log.err(f'tof0: {d0}, tof1: {d1}')
+        # log.err(f'tof0: {d0}, tof1: {d1}')
         d_diff = d0 - d1
 
         theta = np.arctan(d_diff / tof_linear_distance)  # should return angle (-pi/2, pi/2)
@@ -57,7 +57,7 @@ class CutPointRotateAxisController:
         rotation_axis[3:6, :] = np.cross(data["tof0"]["data"][0, :3], data["tof1"]["data"][0, :3]).reshape(
             3, 1
         )  # TODO: clean up homogeneous point
-        log.debug(f"rotation_axis\n{rotation_axis}")
+        # log.debug(f"rotation_axis\n{rotation_axis}")
         # If the cross product is zero then the two vectors are parallel, so we can just choose the  y-axis (camera frame).
         if np.linalg.norm(rotation_axis[3:6, :]) != 0:
             rotation_axis[3:6, :] = rotation_axis[3:6, :] / np.linalg.norm(rotation_axis[3:6, :])

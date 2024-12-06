@@ -26,7 +26,7 @@ def main():
     )
 
     _1_inch = 0.0254
-    penv.activate_shape(shape="cylinder", radius=_1_inch, height=2.82, orientation=[0, np.pi / 2, 0])
+    penv.activate_shape(shape="cylinder", radius=_1_inch*0.5, height=2.81, orientation=[0, np.pi / 2, 0])
     # penv.activate_shape(shape="cylinder", radius=0.01, height=2.85, orientation=[0, np.pi / 2, 0])
 
     # penv.load_tree(
@@ -72,7 +72,8 @@ def main():
             move_action = teleop_action + np.expand_dims(
                 controller_action, axis=1
             )  # TODO: this seems wrong to be in column format
-
+            # log.warn(move_action)
+            # log.warn(np.linalg.norm(move_action))
             joint_vels, jacobian = robot.calculate_joint_velocities_from_ee_velocity_dls(
                 end_effector_velocity=move_action
             )
